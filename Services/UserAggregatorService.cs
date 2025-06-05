@@ -1,19 +1,22 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
 using UserAggregator.Models;
 using UserAggregator.Providers;
 
 namespace UserAggregator.Services
 {
+    // aggregates users from all configured providers asynchronously.
     public class UserAggregatorService
     {
         private readonly IEnumerable<IUserProvider> _userProviders;
 
         public UserAggregatorService(IEnumerable<IUserProvider> userProviders)
         {
-            _userProviders = userProviders;
+            _userProviders = userProviders ?? throw new ArgumentNullException(nameof(userProviders));
         }
 
-        // aggregates users from all configured providers asynchronously.
-        // <returns>A list of distinct users aggregated from all providers.</returns>
         public async Task<List<User>> AggregateUsersAsync()
         {
             var userTasks = _userProviders.Select(async provider =>
@@ -24,7 +27,7 @@ namespace UserAggregator.Services
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"Error fetching users from {provider.GetType().Name}: {ex.Message}");
+                    Console.Error.WriteLine($"Error fetching users from {provider.GetType().Name}: {ex.Message}");
                     return new List<User>();
                 }
             });
@@ -33,7 +36,6 @@ namespace UserAggregator.Services
 
             var allUsers = results.SelectMany(users => users).ToList();
 
-            // remove duplicate users by SourceId
             return allUsers.DistinctBy(u => u.SourceId).ToList();
         }
     }

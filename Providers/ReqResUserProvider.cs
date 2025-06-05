@@ -1,15 +1,33 @@
+using System.Text.Json;
 using System.Net.Http.Json;
 using UserAggregator.Models;
-using System.Text.Json;
+using DotNetEnv;
 
 namespace UserAggregator.Providers
 {
-    /// Fetches paginated user data from the ReqRes API.
-    public class ReqResUserProvider : IUserProvider
+    // Fetches paginated user data from the ReqRes API.
+    public class ReqResUserProvider : BaseUserProvider
     {
-        private readonly HttpClient _httpClient = new();
+        private const string ApiUrlTemplate = "https://reqres.in/api/users?page={0}";
 
-        public async Task<List<User>> GetUsersAsync()
+        public ReqResUserProvider(HttpClient? httpClient = null) : base(httpClient)
+        {
+            _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("UserAggregatorApp/1.0");
+
+            Env.Load();
+
+            var apiKey = Environment.GetEnvironmentVariable("REQRES_API_KEY");
+            if (string.IsNullOrEmpty(apiKey))
+            {
+                LogWarning("Missing REQRES_API_KEY environment variable");
+            }
+            else
+            {
+                _httpClient.DefaultRequestHeaders.Add("x-api-key", apiKey);
+            }
+        }
+
+        public override async Task<List<User>> GetUsersAsync()
         {
             var users = new List<User>();
             int currentPage = 1;
@@ -19,11 +37,20 @@ namespace UserAggregator.Providers
             {
                 do
                 {
-                    var response = await _httpClient.GetFromJsonAsync<JsonElement>($"https://reqres.in/api/users?page={currentPage}");
+                    var url = string.Format(ApiUrlTemplate, currentPage);
+                    using var responseMessage = await _httpClient.GetAsync(url);
+
+                    if (!responseMessage.IsSuccessStatusCode)
+                    {
+                        LogWarning($"HTTP {(int)responseMessage.StatusCode} {responseMessage.ReasonPhrase} for page {currentPage}");
+                        break;
+                    }
+
+                    var response = await responseMessage.Content.ReadFromJsonAsync<JsonElement>();
 
                     if (response.ValueKind != JsonValueKind.Object)
                     {
-                        Console.WriteLine("Warning: Unexpected JSON structure from ReqRes API.");
+                        LogWarning("Unexpected JSON structure from ReqRes API.");
                         break;
                     }
 
@@ -34,38 +61,37 @@ namespace UserAggregator.Providers
 
                     if (response.TryGetProperty("data", out var dataElement) && dataElement.ValueKind == JsonValueKind.Array)
                     {
-                        foreach (var element in dataElement.EnumerateArray())
+                        foreach (var userElement in dataElement.EnumerateArray())
                         {
-                            users.Add(new User
-                            {
-                                FirstName = element.GetProperty("first_name").GetString() ?? string.Empty,
-                                LastName = element.GetProperty("last_name").GetString() ?? string.Empty,
-                                Email = element.GetProperty("email").GetString() ?? string.Empty,
-                                SourceId = element.GetProperty("id").GetInt32().ToString()
-                            });
+                            users.Add(new User(
+                                firstName: userElement.GetProperty("first_name").GetString() ?? string.Empty,
+                                lastName: userElement.GetProperty("last_name").GetString() ?? string.Empty,
+                                email: userElement.GetProperty("email").GetString() ?? string.Empty,
+                                sourceId: userElement.GetProperty("id").GetInt32().ToString()
+                            ));
                         }
                     }
                     else
                     {
-                        Console.WriteLine($"Warning: Missing or invalid 'data' on page {currentPage}");
+                        LogWarning($"Missing or invalid 'data' array on page {currentPage}");
                         break;
                     }
 
                     currentPage++;
-
-                } while (currentPage <= totalPages);
+                }
+                while (currentPage <= totalPages);
             }
-            catch (HttpRequestException httpEx)
+            catch (HttpRequestException ex)
             {
-                Console.WriteLine($"HTTP error in ReqResUserProvider: {httpEx.Message}");
+                LogError(nameof(ReqResUserProvider), ex);
             }
-            catch (JsonException jsonEx)
+            catch (JsonException ex)
             {
-                Console.WriteLine($"JSON parsing error in ReqResUserProvider: {jsonEx.Message}");
+                LogError(nameof(ReqResUserProvider), ex);
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Unexpected error in ReqResUserProvider: {ex.Message}");
+                LogError(nameof(ReqResUserProvider), ex);
             }
 
             return users;
