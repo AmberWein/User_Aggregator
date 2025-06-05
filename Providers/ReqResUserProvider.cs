@@ -1,53 +1,100 @@
-// This provider fetches users from the ReqRes API, handling pagination to retrieve all users.
-
+using System.Text.Json;
 using System.Net.Http.Json;
 using UserAggregator.Models;
-using System.Text.Json;
+using DotNetEnv;
 
-namespace UserAggregator.Providers;
-public class ReqResUserProvider : IUserProvider
+namespace UserAggregator.Providers
 {
-    private readonly HttpClient _httpClient = new();
-
-    public async Task<List<User>> GetUsersAsync()
+    // Fetches paginated user data from the ReqRes API.
+    public class ReqResUserProvider : BaseUserProvider
     {
-        var users = new List<User>();
-        int currentPage = 1;
-        int totalPages = 1;
+        private const string ApiUrlTemplate = "https://reqres.in/api/users?page={0}";
 
-        try
+        public ReqResUserProvider(HttpClient? httpClient = null) : base(httpClient)
         {
-            do
+            _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("UserAggregatorApp/1.0");
+
+            Env.Load();
+
+            var apiKey = Environment.GetEnvironmentVariable("REQRES_API_KEY");
+            if (string.IsNullOrEmpty(apiKey))
             {
-                var response = await _httpClient.GetFromJsonAsync<JsonElement>($"https://reqres.in/api/users?page={currentPage}");
-
-                if (response.TryGetProperty("total_pages", out var totalPagesElement))
-                {
-                    totalPages = totalPagesElement.GetInt32();
-                }
-
-                if (response.TryGetProperty("data", out var dataElement))
-                {
-                    foreach (var element in dataElement.EnumerateArray())
-                    {
-                        users.Add(new User
-                        {
-                            FirstName = element.GetProperty("first_name").GetString() ?? string.Empty,
-                            LastName = element.GetProperty("last_name").GetString() ?? string.Empty,
-                            Email = element.GetProperty("email").GetString() ?? string.Empty,
-                            SourceId = element.GetProperty("id").GetInt32().ToString()
-                        });
-                    }
-                }
-
-                currentPage++;
-            } while (currentPage <= totalPages);
+                LogWarning("Missing REQRES_API_KEY environment variable");
+            }
+            else
+            {
+                _httpClient.DefaultRequestHeaders.Add("x-api-key", apiKey);
+            }
         }
-        catch (Exception ex)
+
+        public override async Task<List<User>> GetUsersAsync()
         {
-            Console.WriteLine($"Error in ReqResUserProvider: {ex.Message}");
-        }
+            var users = new List<User>();
+            int currentPage = 1;
+            int totalPages = 1;
 
-        return users;
+            try
+            {
+                do
+                {
+                    var url = string.Format(ApiUrlTemplate, currentPage);
+                    using var responseMessage = await _httpClient.GetAsync(url);
+
+                    if (!responseMessage.IsSuccessStatusCode)
+                    {
+                        LogWarning($"HTTP {(int)responseMessage.StatusCode} {responseMessage.ReasonPhrase} for page {currentPage}");
+                        break;
+                    }
+
+                    var response = await responseMessage.Content.ReadFromJsonAsync<JsonElement>();
+
+                    if (response.ValueKind != JsonValueKind.Object)
+                    {
+                        LogWarning("Unexpected JSON structure from ReqRes API.");
+                        break;
+                    }
+
+                    if (response.TryGetProperty("total_pages", out var totalPagesElement))
+                    {
+                        totalPages = totalPagesElement.GetInt32();
+                    }
+
+                    if (response.TryGetProperty("data", out var dataElement) && dataElement.ValueKind == JsonValueKind.Array)
+                    {
+                        foreach (var userElement in dataElement.EnumerateArray())
+                        {
+                            users.Add(new User(
+                                firstName: userElement.GetProperty("first_name").GetString() ?? string.Empty,
+                                lastName: userElement.GetProperty("last_name").GetString() ?? string.Empty,
+                                email: userElement.GetProperty("email").GetString() ?? string.Empty,
+                                sourceId: userElement.GetProperty("id").GetInt32().ToString()
+                            ));
+                        }
+                    }
+                    else
+                    {
+                        LogWarning($"Missing or invalid 'data' array on page {currentPage}");
+                        break;
+                    }
+
+                    currentPage++;
+                }
+                while (currentPage <= totalPages);
+            }
+            catch (HttpRequestException ex)
+            {
+                LogError(nameof(ReqResUserProvider), ex);
+            }
+            catch (JsonException ex)
+            {
+                LogError(nameof(ReqResUserProvider), ex);
+            }
+            catch (Exception ex)
+            {
+                LogError(nameof(ReqResUserProvider), ex);
+            }
+
+            return users;
+        }
     }
 }

@@ -1,32 +1,59 @@
+using System.Text.Json;
 using System.Net.Http.Json;
 using UserAggregator.Models;
-using System.Text.Json;
 
-namespace UserAggregator.Providers;
-public class JsonPlaceholderUserProvider : IUserProvider
+namespace UserAggregator.Providers
 {
-    private readonly HttpClient _httpClient = new();
-
-    public async Task<List<User>> GetUsersAsync()
+    // Fetches users from the JSONPlaceholder API.
+    public class JsonPlaceholderUserProvider : BaseUserProvider
     {
-        var response = await _httpClient.GetFromJsonAsync<JsonElement>("https://jsonplaceholder.typicode.com/users");
-        var users = new List<User>();
-        
-        foreach (var element in response.EnumerateArray())
-        {
-            var fullName = element.GetProperty("name").GetString() ?? string.Empty;
-            var nameParts = fullName.Split(' ', 2);
-            var firstName = nameParts.Length > 0 ? nameParts[0] : string.Empty;
-            var lastName = nameParts.Length > 1 ? nameParts[1] : string.Empty;
+        private const string ApiUrl = "https://jsonplaceholder.typicode.com/users";
 
-            users.Add(new User
+        public JsonPlaceholderUserProvider(HttpClient? httpClient = null) : base(httpClient) { }
+
+        public override async Task<List<User>> GetUsersAsync()
+        {
+            var users = new List<User>();
+
+            try
             {
-                FirstName = firstName,
-                LastName = lastName,
-                Email = element.GetProperty("email").GetString() ?? string.Empty,
-                SourceId = element.GetProperty("id").GetRawText()
-            });
+                var response = await _httpClient.GetFromJsonAsync<JsonElement>(ApiUrl);
+
+                if (response.ValueKind != JsonValueKind.Array)
+                {
+                    LogWarning("Unexpected JSON format from JSONPlaceholder.");
+                    return users;
+                }
+
+                foreach (var userElement in response.EnumerateArray())
+                {
+                    var fullName = userElement.GetProperty("name").GetString() ?? string.Empty;
+                    var nameParts = fullName.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
+                    var firstName = nameParts.Length > 0 ? nameParts[0] : string.Empty;
+                    var lastName = nameParts.Length > 1 ? nameParts[1] : string.Empty;
+
+                    users.Add(new User(
+                        firstName,
+                        lastName,
+                        userElement.GetProperty("email").GetString() ?? string.Empty,
+                        userElement.GetProperty("id").GetRawText()
+                    ));
+                }
+            }
+            catch (HttpRequestException ex)
+            {
+                LogError(nameof(JsonPlaceholderUserProvider), ex);
+            }
+            catch (JsonException ex)
+            {
+                LogError(nameof(JsonPlaceholderUserProvider), ex);
+            }
+            catch (Exception ex)
+            {
+                LogError(nameof(JsonPlaceholderUserProvider), ex);
+            }
+
+            return users;
         }
-        return users;
     }
 }

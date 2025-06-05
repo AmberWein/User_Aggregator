@@ -1,29 +1,54 @@
+using System.Text.Json;
 using System.Net.Http.Json;
 using UserAggregator.Models;
-using System.Text.Json;
 
-namespace UserAggregator.Providers;
-public class RandomUserProvider : IUserProvider
+namespace UserAggregator.Providers
 {
-    private readonly HttpClient _httpClient = new();
-
-    public async Task<List<User>> GetUsersAsync()
+    // Fetches users from the RandomUser API.
+    public class RandomUserProvider : BaseUserProvider
     {
-        var response = await _httpClient.GetFromJsonAsync<JsonElement>("https://randomuser.me/api/?results=500");
-        // response.EnsureSuccessStatusCode();
-        var results = response.GetProperty("results");
+        private const string ApiUrl = "https://randomuser.me/api/?results=500";
 
-        var users = new List<User>();
-        foreach (var element in results.EnumerateArray())
+        public RandomUserProvider(HttpClient? httpClient = null) : base(httpClient) { }
+
+        public override async Task<List<User>> GetUsersAsync()
         {
-            users.Add(new User
+            var users = new List<User>();
+
+            try
             {
-                FirstName = element.GetProperty("name").GetProperty("first").GetString() ?? string.Empty,
-                LastName = element.GetProperty("name").GetProperty("last").GetString() ?? string.Empty,
-                Email = element.GetProperty("email").GetString() ?? string.Empty,
-                SourceId = element.GetProperty("login").GetProperty("uuid").GetString() ?? string.Empty
-            });
+                var response = await _httpClient.GetFromJsonAsync<JsonElement>(ApiUrl);
+
+                if (response.ValueKind != JsonValueKind.Object || !response.TryGetProperty("results", out var results))
+                {
+                    LogWarning("Unexpected JSON structure from RandomUser API.");
+                    return users;
+                }
+
+                foreach (var userElement in results.EnumerateArray())
+                {
+                    users.Add(new User(
+                        userElement.GetProperty("name").GetProperty("first").GetString() ?? string.Empty,
+                        userElement.GetProperty("name").GetProperty("last").GetString() ?? string.Empty,
+                        userElement.GetProperty("email").GetString() ?? string.Empty,
+                        userElement.GetProperty("login").GetProperty("uuid").GetString() ?? string.Empty
+                    ));
+                }
+            }
+            catch (HttpRequestException ex)
+            {
+                LogError(nameof(RandomUserProvider), ex);
+            }
+            catch (JsonException ex)
+            {
+                LogError(nameof(RandomUserProvider), ex);
+            }
+            catch (Exception ex)
+            {
+                LogError(nameof(RandomUserProvider), ex);
+            }
+
+            return users;
         }
-        return users;
     }
 }

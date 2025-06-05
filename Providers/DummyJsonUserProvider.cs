@@ -1,29 +1,54 @@
+using System.Text.Json;
 using System.Net.Http.Json;
 using UserAggregator.Models;
-using System.Text.Json;
 
-namespace UserAggregator.Providers;
-public class DummyJsonUserProvider : IUserProvider
+namespace UserAggregator.Providers
 {
-    private readonly HttpClient _httpClient = new();
-
-    public async Task<List<User>> GetUsersAsync()
+    // Fetches users from the DummyJSON API.
+    public class DummyJsonUserProvider : BaseUserProvider
     {
-        var response = await _httpClient.GetFromJsonAsync<JsonElement>("https://dummyjson.com/users");
-        var results = response.GetProperty("users");
+        private const string ApiUrl = "https://dummyjson.com/users";
 
-        var users = new List<User>();
+        public DummyJsonUserProvider(HttpClient? httpClient = null) : base(httpClient) { }
 
-        foreach (var element in results.EnumerateArray())
+        public override async Task<List<User>> GetUsersAsync()
         {
-            users.Add(new User
+            var users = new List<User>();
+
+            try
             {
-                FirstName = element.GetProperty("firstName").GetString() ?? string.Empty,
-                LastName = element.GetProperty("lastName").GetString() ?? string.Empty,
-                Email = element.GetProperty("email").GetString() ?? string.Empty,
-                SourceId = element.GetProperty("id").GetInt32().ToString()
-            });
+                var response = await _httpClient.GetFromJsonAsync<JsonElement>(ApiUrl);
+
+                if (!response.TryGetProperty("users", out var usersArray))
+                {
+                    LogWarning("'users' property not found in DummyJSON response.");
+                    return users;
+                }
+
+                foreach (var userElement in usersArray.EnumerateArray())
+                {
+                    users.Add(new User(
+                        userElement.GetProperty("firstName").GetString() ?? string.Empty,
+                        userElement.GetProperty("lastName").GetString() ?? string.Empty,
+                        userElement.GetProperty("email").GetString() ?? string.Empty,
+                        userElement.GetProperty("id").GetInt32().ToString()
+                    ));
+                }
+            }
+            catch (HttpRequestException ex)
+            {
+                LogError(nameof(DummyJsonUserProvider), ex);
+            }
+            catch (JsonException ex)
+            {
+                LogError(nameof(DummyJsonUserProvider), ex);
+            }
+            catch (Exception ex)
+            {
+                LogError(nameof(DummyJsonUserProvider), ex);
+            }
+
+            return users;
         }
-        return users;
     }
 }
