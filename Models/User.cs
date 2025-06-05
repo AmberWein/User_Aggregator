@@ -1,4 +1,4 @@
-namespace UserAggragate.Models;
+namespace UserAggregator.Models;
 
 public class User
 {
