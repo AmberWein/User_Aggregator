@@ -1,4 +1,4 @@
-using System.Net.Http.Jsomn;
+using System.Net.Http.Json;
 using UserAggregator.Models;
 using System.Text.Json;
 
@@ -18,10 +18,10 @@ public class RandomUserProvider : IUserProvider
         {
             users.Add(new User
             {
-                FirstName = element.GetProperty("name").GetProperty("first").GetString(),
-                LastName = element.GetProperty("name").GetProperty("last").GetString(),
-                Email = element.GetProperty("email").GetString(),
-                SourceId = element.GetProperty("login").GetProperty("uuid").GetString()
+                FirstName = element.GetProperty("name").GetProperty("first").GetString() ?? string.Empty,
+                LastName = element.GetProperty("name").GetProperty("last").GetString() ?? string.Empty,
+                Email = element.GetProperty("email").GetString() ?? string.Empty,
+                SourceId = element.GetProperty("login").GetProperty("uuid").GetString() ?? string.Empty
             });
         }
         return users;
